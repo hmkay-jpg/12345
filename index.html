@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conway's Game of Life</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the canvas */
+        canvas {
+            border: 2px solid #1f2937; /* Dark Gray border */
+            background-color: #f3f4f6; /* Light gray background */
+            touch-action: none; /* Prevent unwanted touch gestures */
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4 sm:p-8 flex flex-col items-center font-sans">
+
+    <div class="max-w-4xl w-full">
+        <h1 class="text-4xl font-extrabold text-gray-800 mb-6 text-center">
+            Conway's Game of Life
+        </h1>
+
+        <!-- Controls Container -->
+        <div class="bg-white p-6 rounded-xl shadow-2xl mb-8 border border-gray-200">
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                
+                <!-- Cell Size Input -->
+                <div class="flex flex-col">
+                    <label for="cellSizeInput" class="text-sm font-medium text-gray-600 mb-1">Cell Size (px)</label>
+                    <input type="number" id="cellSizeInput" value="10" min="5" max="25" class="p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150 shadow-sm">
+                </div>
+
+                <!-- Speed Input -->
+                <div class="flex flex-col">
+                    <label for="speedInput" class="text-sm font-medium text-gray-600 mb-1">Speed (ms/gen)</label>
+                    <input type="number" id="speedInput" value="100" min="20" max="1000" class="p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150 shadow-sm">
+                </div>
+                
+                <!-- Density Input -->
+                <div class="flex flex-col">
+                    <label for="densityInput" class="text-sm font-medium text-gray-600 mb-1">Density (%)</label>
+                    <input type="number" id="densityInput" value="25" min="10" max="70" class="p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150 shadow-sm">
+                </div>
+
+                <!-- Generation Counter -->
+                <div class="flex flex-col justify-end">
+                    <label class="text-sm font-medium text-gray-600 mb-1">Generation</label>
+                    <div id="generationCounter" class="p-2 bg-gray-50 border border-gray-300 rounded-lg text-lg font-bold text-center text-gray-700">0</div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex flex-col sm:flex-row gap-4">
+                <button id="startStopButton" class="w-full sm:w-1/2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition duration-200 focus:outline-none focus:ring-4 focus:ring-blue-300">
+                    Start
+                </button>
+                <button id="resetButton" class="w-full sm:w-1/2 bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-lg shadow-md transition duration-200 focus:outline-none focus:ring-4 focus:ring-red-300">
+                    Reset Random Grid
+                </button>
+            </div>
+            
+            <p class="text-center text-sm text-gray-500 mt-4 italic">
+                Tip: Click or tap directly on the canvas to draw your own starting pattern!
+            </p>
+        </div>
+
+        <!-- Canvas Container -->
+        <div class="w-full flex justify-center">
+            <canvas id="gameOfLifeCanvas" width="500" height="500"></canvas>
+        </div>
+
+    </div>
+
+    <script type="text/javascript">
+        // Global State Variables
+        const CANVAS_SIZE = 500;
+        let canvas, ctx;
+        let grid;
+        let rows, cols;
+        let cellSize = 10; // Default cell size in pixels
+        let isRunning = false;
+        let intervalId = null;
+        let speed = 100; // ms per generation
+        let density = 0.25;
+        let generation = 0;
+
+        // DOM Elements
+        const startStopButton = document.getElementById('startStopButton');
+        const resetButton = document.getElementById('resetButton');
+        const cellSizeInput = document.getElementById('cellSizeInput');
+        const speedInput = document.getElementById('speedInput');
+        const densityInput = document.getElementById('densityInput');
+        const generationCounter = document.getElementById('generationCounter');
+
+        // --- Utility Functions ---
+
+        /**
+         * Initializes the grid with a random state based on the current density.
+         */
+        function initializeGrid() {
+            cellSize = parseInt(cellSizeInput.value) || 10;
+            density = (parseInt(densityInput.value) || 25) / 100;
+
+            // Recalculate grid dimensions based on new cell size
+            rows = Math.floor(CANVAS_SIZE / cellSize);
+            cols = Math.floor(CANVAS_SIZE / cellSize);
+            
+            grid = new Array(rows).fill(0).map(() => 
+                new Array(cols).fill(0).map(() => (Math.random() < density ? 1 : 0))
+            );
+            generation = 0;
+            updateCounter();
+            drawGrid();
+        }
+
+        /**
+         * Updates the generation counter displayed in the UI.
+         */
+        function updateCounter() {
+            generationCounter.textContent = generation;
+        }
+        
+        /**
+         * Draws the current state of the grid onto the canvas.
+         */
+        function drawGrid() {
+            if (!ctx) return;
+            ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+            // Set the color for alive cells (a nice dark blue)
+            ctx.fillStyle = '#2563eb'; 
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (grid[r][c] === 1) {
+                        ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+                    }
+                }
+            }
+        }
+
+        /**
+         * Counts the number of live neighbors for a cell at (r, c).
+         * Uses toroidal (wrapping) borders.
+         * @param {number} r - row index
+         * @param {number} c - column index
+         * @returns {number} The count of live neighbors
+         */
+        function countNeighbors(r, c) {
+            let count = 0;
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    if (i === 0 && j === 0) continue; // Skip the cell itself
+
+                    // Calculate neighbor coordinates with wrapping (toroidal)
+                    const neighborR = (r + i + rows) % rows;
+                    const neighborC = (c + j + cols) % cols;
+
+                    count += grid[neighborR][neighborC];
+                }
+            }
+            return count;
+        }
+
+        /**
+         * Calculates the next state of the grid based on Game of Life rules.
+         */
+        function nextGeneration() {
+            const nextGrid = grid.map(arr => [...arr]); // Deep copy the grid
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const neighbors = countNeighbors(r, c);
+                    const isAlive = grid[r][c] === 1;
+
+                    // 1. Underpopulation or Overpopulation -> Dies
+                    if (isAlive && (neighbors < 2 || neighbors > 3)) {
+                        nextGrid[r][c] = 0;
+                    } 
+                    // 2. Reproduction -> Becomes Alive
+                    else if (!isAlive && neighbors === 3) {
+                        nextGrid[r][c] = 1;
+                    }
+                    // 3. Lives on (2 or 3 neighbors) -> State remains the same
+                    // else { nextGrid[r][c] = grid[r][c]; }
+                }
+            }
+
+            grid = nextGrid;
+            generation++;
+            updateCounter();
+        }
+
+        // --- Control Functions ---
+
+        /**
+         * Toggles the simulation between running and stopped states.
+         */
+        function startStop() {
+            if (isRunning) {
+                clearInterval(intervalId);
+                intervalId = null;
+                isRunning = false;
+                startStopButton.textContent = 'Start';
+                startStopButton.classList.remove('bg-yellow-500', 'hover:bg-yellow-600');
+                startStopButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                // Enable inputs when stopped
+                cellSizeInput.disabled = false;
+                speedInput.disabled = false;
+                densityInput.disabled = false;
+            } else {
+                // Read new speed parameter
+                speed = parseInt(speedInput.value) || 100;
+
+                // Stop inputs when running (to prevent mid-run size changes)
+                cellSizeInput.disabled = true;
+                densityInput.disabled = true;
+                
+                isRunning = true;
+                startStopButton.textContent = 'Stop';
+                startStopButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                startStopButton.classList.add('bg-yellow-500', 'hover:bg-yellow-600');
+                
+                // Start the loop
+                intervalId = setInterval(() => {
+                    nextGeneration();
+                    drawGrid();
+                }, speed);
+            }
+        }
+
+        /**
+         * Resets the grid to a new random configuration.
+         */
+        function resetGrid() {
+            if (isRunning) {
+                startStop(); // Stop first if running
+            }
+            // Allow parameter changes only on reset/stop
+            cellSizeInput.disabled = false;
+            speedInput.disabled = false;
+            densityInput.disabled = false;
+            initializeGrid();
+        }
+
+        /**
+         * Handles mouse/touch clicks on the canvas to toggle cell state.
+         * @param {Event} event - MouseEvent or TouchEvent
+         */
+        function toggleCell(event) {
+            // Determine the coordinates relative to the canvas
+            const rect = canvas.getBoundingClientRect();
+            let clientX, clientY;
+
+            if (event.touches) {
+                // For touch events
+                clientX = event.touches[0].clientX;
+                clientY = event.touches[0].clientY;
+            } else {
+                // For mouse events
+                clientX = event.clientX;
+                clientY = event.clientY;
+            }
+
+            // Calculate the position within the canvas
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+
+            // Determine the cell indices
+            const c = Math.floor(x / cellSize);
+            const r = Math.floor(y / cellSize);
+
+            if (r >= 0 && r < rows && c >= 0 && c < cols) {
+                // Toggle the cell state
+                grid[r][c] = grid[r][c] === 1 ? 0 : 1;
+                drawGrid();
+            }
+        }
+
+        // --- Initialization and Event Listeners ---
+        window.onload = function() {
+            canvas = document.getElementById('gameOfLifeCanvas');
+            ctx = canvas.getContext('2d');
+
+            // Set fixed canvas size (which defines the drawing area)
+            canvas.width = CANVAS_SIZE;
+            canvas.height = CANVAS_SIZE;
+
+            // Initial setup
+            initializeGrid(); 
+            
+            // Event Listeners for Controls
+            startStopButton.addEventListener('click', startStop);
+            resetButton.addEventListener('click', resetGrid);
+            
+            // Event Listeners for Grid Editing (Mouse and Touch)
+            canvas.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                toggleCell(e);
+            });
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                toggleCell(e);
+            }, { passive: false });
+
+            // Rerunning initializeGrid on parameter change but ONLY when stopped
+            cellSizeInput.addEventListener('change', () => { if (!isRunning) initializeGrid(); });
+            densityInput.addEventListener('change', () => { if (!isRunning) initializeGrid(); });
+            // Speed change can happen while running
+            speedInput.addEventListener('change', () => {
+                if (isRunning) {
+                    // Update speed immediately by resetting the interval
+                    clearInterval(intervalId);
+                    speed = parseInt(speedInput.value) || 100;
+                    intervalId = setInterval(() => {
+                        nextGeneration();
+                        drawGrid();
+                    }, speed);
+                }
+            });
+        };
+    </script>
+</body>
+</html>
